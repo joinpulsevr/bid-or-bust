@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Host — Bid or Bust</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .host-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .host-grid { grid-template-columns: 1fr; } }
+  .stat { text-align: center; }
+  .stat .num { font-size: 34px; font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
+  .stat .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .spoiler { background: rgba(247,197,72,.1); border: 1px solid rgba(247,197,72,.5); border-radius: 12px; padding: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="crown">👑</span><span class="gavel">🔨</span><span class="crown">👑</span></div>
+  <h1 class="title">Bid or Bust</h1>
+  <p class="subtitle">Host Control</p>
+
+  <!-- SETUP -->
+  <div class="card" id="setupSec">
+    <h3>New game</h3>
+    <div class="two-col">
+      <div>
+        <label class="field" for="startCash">Starting cash per player ($)</label>
+        <input type="number" id="startCash" value="500" min="100" max="5000" step="50">
+      </div>
+      <div>
+        <label class="field" for="bidSeconds">Bidding time per lot (seconds)</label>
+        <input type="number" id="bidSeconds" value="120" min="10" max="180">
+      </div>
+    </div>
+    <p class="muted small">15 mystery lots are shuffled fresh every game. One random lot becomes the sealed High Roller round. Bids move in $50 increments.</p>
+    <button class="btn btn-primary btn-big" id="createBtn" style="margin-top:10px">Create Room</button>
+  </div>
+
+  <!-- ROOM INFO -->
+  <div class="card hidden" id="roomSec">
+    <div class="center">
+      <div class="kicker">Room code — players join at</div>
+      <div class="code-badge" id="roomCode">----</div>
+    </div>
+    <div class="linkbox"><span id="playerLink"></span><button class="btn btn-ghost" data-copy="playerLink">Copy</button></div>
+    <div class="linkbox"><span id="castLink"></span><button class="btn btn-ghost" data-copy="castLink">Copy</button></div>
+    <p class="muted small center">Player link goes on phones. Broadcast link goes in OBS → stream it → load the stream in the VRChat video player.</p>
+  </div>
+
+  <!-- LOBBY -->
+  <div class="card hidden" id="lobbySec">
+    <h3>Lobby — <span id="lobbyCount">0</span> players in</h3>
+    <div class="dots" id="lobbyDots"></div>
+    <button class="btn btn-primary btn-big" id="startBtn">Start Game</button>
+    <p class="muted small">Players can join only while you're in the lobby. Cap is 50.</p>
+  </div>
+
+  <!-- GAME -->
+  <div class="card hidden" id="gameSec">
+    <div class="row" style="justify-content:space-between">
+      <div><span class="kicker">Lot <span id="lotNum">1</span> of 15</span></div>
+      <div><span class="pill in" id="phasePill">READY</span></div>
+    </div>
+    <div class="dots" id="dots"></div>
+
+    <div class="spoiler" id="spoilerBox">
+      <div class="small muted">INSIDE THIS BOX (host only — don't read it out!)</div>
+      <div style="font-size:20px; font-weight:800" id="spoilerLabel">—</div>
+      <div class="muted small" id="spoilerDetail"></div>
+      <div class="small" id="sealedNote" style="margin-top:6px"></div>
+    </div>
+
+    <div class="host-grid" style="margin-top:12px">
+      <div class="stat"><div class="num" id="curBid">$0</div><div class="lbl">Current bid</div></div>
+      <div class="stat"><div class="num" id="leader" style="font-size:24px">—</div><div class="lbl">High bidder</div></div>
+      <div class="stat"><div class="num" id="timeLeft">—</div><div class="lbl">Seconds left</div></div>
+      <div class="stat"><div class="num" id="inCount">0</div><div class="lbl">Players still in</div></div>
+    </div>
+
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary btn-big hidden" id="openBtn">🔨 Open Bidding</button>
+      <button class="btn btn-danger btn-big hidden" id="closeBtn">Close Bidding Early</button>
+      <button class="btn btn-gold btn-big hidden" id="nextBtn">Next Lot →</button>
+    </div>
+
+    <div id="revealBox" class="hidden" style="margin-top:12px"></div>
+  </div>
+
+  <!-- PLAYERS -->
+  <div class="card hidden" id="playersSec">
+    <h3>Players</h3>
+    <div style="overflow-x:auto">
+    <table class="ptable">
+      <thead><tr><th>Player</th><th>Balance</th><th>Lots</th><th>Prize $</th><th>Status</th></tr></thead>
+      <tbody id="playerRows"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- DONE -->
+  <div class="card hidden" id="doneSec">
+    <h3>🏆 Final results</h3>
+    <ul class="winnings-list standings" id="standings"></ul>
+    <button class="btn btn-ghost btn-big" id="newGameBtn" style="margin-top:12px">Start a New Game</button>
+  </div>
+</div>
+
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+const money = n => '$' + Number(n).toLocaleString();
+let state = null, tick = null;
+
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+const ack = (ev, data) => new Promise(res => socket.emit(ev, data, res));
+
+async function createRoom() {
+  const settings = {
+    startCash: Math.max(100, parseInt($('startCash').value, 10) || 500),
+    bidSeconds: Math.max(10, parseInt($('bidSeconds').value, 10) || 120),
+  };
+  const r = await ack('host:create', { settings });
+  if (!r.ok) return toast(r.error);
+  localStorage.setItem('bob_hostCode', r.code);
+  localStorage.setItem('bob_hostToken', r.hostToken);
+  showRoom(r.code);
+}
+
+function showRoom(code) {
+  $('setupSec').classList.add('hidden');
+  $('roomSec').classList.remove('hidden');
+  $('roomCode').textContent = code;
+  $('playerLink').textContent = location.origin + '/play.html?room=' + code;
+  $('castLink').textContent = location.origin + '/broadcast.html?room=' + code;
+}
+
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const txt = $(btn.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(txt); toast('Link copied!'); }
+    catch { toast(txt); }
+  });
+});
+
+$('createBtn').onclick = createRoom;
+$('startBtn').onclick = async () => { const r = await ack('host:startGame', {}); if (!r.ok) toast(r.error); };
+$('openBtn').onclick = async () => { const r = await ack('host:openBidding', {}); if (!r.ok) toast(r.error || ''); };
+$('closeBtn').onclick = async () => { await ack('host:closeBidding', {}); };
+$('nextBtn').onclick = async () => { const r = await ack('host:nextLot', {}); if (!r.ok) toast(r.error); };
+$('newGameBtn').onclick = () => location.reload();
+
+function phaseLabel(ph) {
+  return { lobby: 'LOBBY', between: 'READY', bidding: 'BIDDING OPEN', sealed: 'SEALED ROUND', reveal: 'REVEAL', done: 'GAME OVER' }[ph] || ph;
+}
+
+function render(s) {
+  state = s;
+  $('lobbySec').classList.toggle('hidden', s.phase !== 'lobby');
+  $('gameSec').classList.toggle('hidden', !['between', 'bidding', 'sealed', 'reveal'].includes(s.phase));
+  $('playersSec').classList.toggle('hidden', s.phase === 'lobby' && s.players.length === 0);
+  $('doneSec').classList.toggle('hidden', s.phase !== 'done');
+
+  if (s.phase === 'lobby') {
+    $('lobbyCount').textContent = s.players.length;
+    $('lobbyDots').innerHTML = s.players.map(p =>
+      `<div class="dot" style="background:var(--gold)" title="${esc(p.name)}"></div>`).join('');
+  }
+
+  if (s.hostView) {
+    $('lotNum').textContent = s.roundIndex + 1;
+    const pill = $('phasePill');
+    pill.textContent = phaseLabel(s.phase);
+    pill.className = 'pill ' + (s.phase === 'bidding' || s.phase === 'sealed' ? 'in' : 'out');
+
+    const dots = s.hostView.lots.map((l, i) => {
+      let cls = 'dot';
+      if (l.kind === 'prize') cls += ' done-prize';
+      else if (l.kind === 'bust') cls += ' done-bust';
+      else if (i === s.roundIndex) cls += ' current';
+      return `<div class="${cls}" title="Lot ${i + 1}"></div>`;
+    }).join('');
+    $('dots').innerHTML = dots;
+
+    const lot = s.hostView.currentLot;
+    if (lot) {
+      $('spoilerLabel').textContent = (lot.kind === 'bust' ? '💥 ' : '🎁 ') + lot.label;
+      $('spoilerDetail').textContent = lot.detail;
+      $('sealedNote').innerHTML = (s.roundIndex === s.hostView.sealedRound)
+        ? '🤐 <b>HIGH ROLLER round</b> — sealed secret bids this lot.'
+        : 'Lot ' + (s.hostView.sealedRound + 1) + ' is the secret High Roller round.';
+    }
+
+    $('curBid').textContent = money(s.currentBid);
+    $('leader').textContent = s.highBidderName || (s.isSealed ? '🤐 sealed' : '—');
+    $('inCount').textContent = s.playersIn + ' / ' + s.players.length;
+
+    $('openBtn').classList.toggle('hidden', s.phase !== 'between');
+    $('closeBtn').classList.toggle('hidden', s.phase !== 'bidding' && s.phase !== 'sealed');
+    $('nextBtn').classList.toggle('hidden', s.phase !== 'reveal');
+
+    const rv = s.lastReveal;
+    if (rv && s.phase === 'reveal') {
+      $('revealBox').classList.remove('hidden');
+      $('revealBox').innerHTML = `
+        <div class="spoiler" style="${rv.bust ? 'border-color:var(--pink)' : 'border-color:var(--gold)'}">
+          <div class="small muted">${rv.noBids ? 'NO BIDS — LOT BURNED' : 'WINNER: ' + esc(rv.winnerName) + ' — ' + money(rv.bid)}</div>
+          <div style="font-size:22px; font-weight:800">${rv.bust ? '💥' : '🎁'} ${esc(rv.label)}</div>
+          <div class="muted small">${esc(rv.detail)}</div>
+          ${rv.eliminated.length ? `<div class="small" style="color:#ff9d9d;margin-top:6px">☠️ ${rv.eliminated.map(esc).join(', ')} busted out!</div>` : ''}
+        </div>`;
+    } else {
+      $('revealBox').classList.add('hidden');
+      $('revealBox').innerHTML = '';
+    }
+
+    $('playerRows').innerHTML = s.players.map(p => `
+      <tr class="${p.active ? '' : 'out'}">
+        <td>${esc(p.name)}</td><td>${money(p.balance)}</td><td>${p.lotsWon}</td>
+        <td>${money(p.prizeValue)}</td>
+        <td><span class="pill ${p.active ? 'in' : 'out'}">${p.active ? 'IN' : 'OUT'}</span></td>
+      </tr>`).join('');
+  }
+
+  if (s.phase === 'done') {
+    $('standings').innerHTML = s.players.map((p, i) => `
+      <li class="${i === 0 ? 'rank1' : ''}">
+        <span>${i === 0 ? '🏆 ' : (i + 1) + '. '}${esc(p.name)}</span>
+        <span><b>${money(p.prizeValue)}</b> prizes · ${money(p.balance)} left</span>
+      </li>`).join('');
+  }
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+function startTick() {
+  if (tick) clearInterval(tick);
+  tick = setInterval(() => {
+    if (!state || !state.endsAt) { $('timeLeft').textContent = '—'; return; }
+    const left = Math.max(0, Math.ceil((state.endsAt - Date.now()) / 1000));
+    $('timeLeft').textContent = left + 's';
+  }, 500);
+}
+
+// reclaim host session on refresh
+(async function init() {
+  const code = localStorage.getItem('bob_hostCode');
+  const token = localStorage.getItem('bob_hostToken');
+  if (code && token) {
+    const r = await ack('host:claim', { code, hostToken: token });
+    if (r.ok) showRoom(code);
+    else { localStorage.removeItem('bob_hostCode'); localStorage.removeItem('bob_hostToken'); }
+  }
+  startTick();
+})();
+
+socket.on('hostState', render);
+socket.on('reveal', r => {
+  if (r.noBids) toast('No bids — the lot burned!');
+  else if (r.bust) toast(`💥 ${r.winnerName} opened a BUST: ${r.label}`);
+  else toast(`🎁 ${r.winnerName} won: ${r.label}`);
+});
+</script>
+</body>
+</html>

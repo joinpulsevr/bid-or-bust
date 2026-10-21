@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Play — Bid or Bust</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<div class="wrap" style="max-width:560px">
+
+  <div class="brand"><span class="crown">👑</span><span class="gavel">🔨</span><span class="crown">👑</span></div>
+  <h1 class="title" style="font-size:34px">Bid or Bust</h1>
+
+  <!-- JOIN -->
+  <div class="card" id="joinSec">
+    <img class="flyer-banner" src="flyer.jpg" alt="Bid or Bust">
+    <h3 class="center">Join the auction</h3>
+    <label class="field" for="codeIn">Room code</label>
+    <input type="text" id="codeIn" placeholder="e.g. KX7Q" maxlength="4" autocapitalize="characters" autocomplete="off">
+    <label class="field" for="nameIn">Your display name</label>
+    <input type="text" id="nameIn" placeholder="Your VRChat name" maxlength="24" autocomplete="off">
+    <button class="btn btn-primary btn-big" id="joinBtn" style="margin-top:14px">Join Game</button>
+    <p class="muted small center">Everyone starts with the same stack. $50 bid increments. Hit $0 and you're out.</p>
+  </div>
+
+  <!-- GAME -->
+  <div id="gameSec" class="hidden">
+    <div class="card">
+      <div class="balance-hero">
+        <div class="lbl">Your balance</div>
+        <div class="amt" id="balance">$500</div>
+        <div><span class="pill in" id="statusPill">IN THE GAME</span></div>
+      </div>
+    </div>
+
+    <div class="card center">
+      <div class="kicker" id="lotLabel">Waiting…</div>
+      <div class="giftbox" id="mysteryBox">
+        <div class="crown">👑</div>
+        <div class="lid"></div>
+        <div class="box"></div>
+        <div class="ribbon-v"></div>
+        <span class="q">?</span>
+      </div>
+      <div id="phaseText" class="muted">Waiting for the host to start.</div>
+      <div class="timerbar hidden" id="timerWrap"><div id="timerFill" style="width:100%"></div></div>
+      <div class="timertext hidden" id="timerText"></div>
+    </div>
+
+    <div class="card" id="bidCard">
+      <div class="bid-hero">
+        <div class="amt" id="curBid">$0</div>
+        <div class="leader" id="leaderLine">No bids yet</div>
+      </div>
+      <div id="openBidUI" class="hidden">
+        <div class="btn-row">
+          <button class="btn btn-primary btn-big" id="bidMinBtn">Bid $50</button>
+          <div class="two-col">
+            <button class="btn btn-gold" id="bidPlusBtn">Bid +$100 more</button>
+            <button class="btn btn-ghost" id="peekBtn">👀 Peek <span class="small">(1×)</span></button>
+          </div>
+          <button class="btn btn-danger" id="allInBtn">😱 ALL IN</button>
+        </div>
+        <p class="muted small center" id="peekResult"></p>
+      </div>
+      <div id="sealedUI" class="hidden">
+        <div class="sealed-note">🤐 <b>HIGH ROLLER round!</b> Everyone submits ONE secret bid. Highest wins — no bidding war, no take-backs.</div>
+        <div class="row">
+          <input type="number" id="sealedAmt" class="grow" placeholder="Your secret bid ($50 steps)" min="50" step="50">
+          <button class="btn btn-primary" id="sealedBtn">Lock it in</button>
+        </div>
+        <p class="muted small center" id="sealedConfirm"></p>
+      </div>
+      <div id="closedBidUI" class="center muted">Bidding is closed right now.</div>
+    </div>
+
+    <div class="card">
+      <h3>🎁 Your winnings <span class="muted small" id="winTotal"></span></h3>
+      <ul class="winnings-list" id="winnings"><li class="muted">Nothing yet — win a lot!</li></ul>
+    </div>
+
+    <div class="card">
+      <h3>🏆 Leaderboard</h3>
+      <ul class="winnings-list standings" id="board"></ul>
+      <p class="muted small center" id="counts"></p>
+    </div>
+  </div>
+
+  <div id="outOverlay" class="reveal-overlay hidden">
+    <div class="reveal-card bust">
+      <div class="emoji">☠️</div>
+      <h2>BUSTED OUT</h2>
+      <p>Your balance hit $0. Stick around for the chaos — next game is a fresh stack.</p>
+    </div>
+  </div>
+
+  <div id="revealOverlay" class="reveal-overlay hidden">
+    <div class="reveal-card" id="revealCard">
+      <div class="emoji" id="revealEmoji">🎁</div>
+      <h2 id="revealTitle">—</h2>
+      <p id="revealDetail"></p>
+      <p id="revealMeta" class="small"></p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+const money = n => '$' + Number(n).toLocaleString();
+let myId = localStorage.getItem('bob_playerId') || null;
+let myName = localStorage.getItem('bob_name') || '';
+let code = (new URLSearchParams(location.search).get('room') || localStorage.getItem('bob_code') || '').toUpperCase();
+let state = null, bidTotal = 0;
+
+function toast(msg) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+const ack = (ev, data) => new Promise(res => socket.emit(ev, data, res));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+if (code) $('codeIn').value = code;
+if (myName) $('nameIn').value = myName;
+
+async function join(silent) {
+  code = ($('codeIn').value || code).toUpperCase().trim();
+  const name = $('nameIn').value.trim().slice(0, 24);
+  if (!code || !name) { if (!silent) toast('Enter the room code and your name.'); return; }
+  const r = await ack('player:join', { code, name, playerId: myId });
+  if (!r.ok) { if (!silent) toast(r.error); return; }
+  myId = r.playerId;
+  localStorage.setItem('bob_playerId', myId);
+  localStorage.setItem('bob_code', code);
+  localStorage.setItem('bob_name', name);
+  $('joinSec').classList.add('hidden');
+  $('gameSec').classList.remove('hidden');
+}
+$('joinBtn').onclick = () => join(false);
+
+async function doBid(amount) {
+  const r = await ack('player:bid', { amount });
+  if (!r.ok) toast(r.error);
+}
+$('bidMinBtn').onclick = () => { if (state) doBid(state.currentBid + 50); };
+$('bidPlusBtn').onclick = () => { if (state) doBid(state.currentBid + 150); };
+$('allInBtn').onclick = () => {
+  const me = state && state.players.find(p => p.id === myId);
+  if (me && confirm(`Go ALL IN with ${money(me.balance)}?`)) doBid(me.balance);
+};
+$('peekBtn').onclick = async () => {
+  const r = await ack('player:peek', {});
+  if (!r.ok) return toast(r.error);
+  $('peekResult').innerHTML = r.isPrize
+    ? '👀 Your peek: this box holds a <b style="color:var(--gold)">PRIZE</b>.'
+    : '👀 Your peek: this box is a <b style="color:var(--pink)">BUST</b>. Tread carefully.';
+  $('peekBtn').disabled = true;
+};
+$('sealedBtn').onclick = async () => {
+  const amt = parseInt($('sealedAmt').value, 10);
+  const r = await ack('player:sealedBid', { amount: amt });
+  if (!r.ok) return toast(r.error);
+  $('sealedConfirm').textContent = `Locked in: ${money(amt)}. Fingers crossed.`;
+};
+
+function render(s) {
+  state = s;
+  const me = s.players.find(p => p.id === myId);
+  if (!me) return;
+
+  $('balance').textContent = money(me.balance);
+  const pill = $('statusPill');
+  pill.textContent = me.active ? 'IN THE GAME' : 'BUSTED OUT';
+  pill.className = 'pill ' + (me.active ? 'in' : 'out');
+  $('outOverlay').classList.toggle('hidden', me.active || s.phase === 'lobby' || s.phase === 'done');
+
+  const lotTxt = s.phase === 'lobby' ? 'Waiting…' :
+    s.phase === 'done' ? 'Game over!' : `Lot ${s.roundIndex + 1} of ${s.totalLots}`;
+  $('lotLabel').textContent = lotTxt;
+  const mb = $('mysteryBox');
+  mb.classList.toggle('sealed', !!s.isSealed);
+  mb.querySelector('.q').textContent = s.isSealed ? '🤐' : '?';
+
+  const phaseTxt = {
+    lobby: `Waiting for the host to start — ${s.players.length} in the room.`,
+    between: 'Next mystery box coming up… get ready!',
+    bidding: s.isSealed ? '' : 'Bidding is OPEN — tap fast!',
+    sealed: 'Sealed round — one secret bid each.',
+    reveal: 'Revealing…',
+    done: 'That\'s the game! See the final results.',
+  }[s.phase];
+  $('phaseText').textContent = phaseTxt;
+
+  // timer
+  const showTimer = (s.phase === 'bidding' || s.phase === 'sealed') && s.endsAt;
+  $('timerWrap').classList.toggle('hidden', !showTimer);
+  $('timerText').classList.toggle('hidden', !showTimer);
+
+  // bidding UI
+  const canBid = me.active && s.phase === 'bidding';
+  $('openBidUI').classList.toggle('hidden', !canBid);
+  $('sealedUI').classList.toggle('hidden', !(me.active && s.phase === 'sealed'));
+  $('closedBidUI').classList.toggle('hidden', canBid || (me.active && s.phase === 'sealed'));
+
+  if (s.phase === 'bidding' || s.phase === 'sealed') {
+    $('curBid').textContent = s.isSealed ? '🤐' : money(s.currentBid);
+    $('leaderLine').innerHTML = s.isSealed ? 'Secret bids — highest wins'
+      : s.highBidderName ? (s.highBidderName === me.name ? '<b>🔥 YOU hold the high bid!</b>' : `High bidder: <b>${esc(s.highBidderName)}</b>`)
+      : 'No bids yet — open at $50';
+  } else {
+    $('curBid').textContent = '—';
+    $('leaderLine').textContent = '';
+  }
+
+  if (canBid) {
+    const minNext = s.currentBid + 50;
+    $('bidMinBtn').textContent = `Bid ${money(minNext)}`;
+    $('bidMinBtn').disabled = minNext > me.balance;
+    const plus = minNext + 100;
+    $('bidPlusBtn').textContent = `Bid ${money(plus)}`;
+    $('bidPlusBtn').disabled = plus > me.balance;
+    $('allInBtn').textContent = `😱 ALL IN (${money(me.balance)})`;
+    $('allInBtn').disabled = me.balance < minNext;
+    $('peekBtn').disabled = me.peekUsed;
+    if (me.peekUsed && !$('peekResult').textContent) $('peekResult').textContent = 'Peek already used.';
+  }
+
+  // winnings
+  if (me.winnings.length) {
+    $('winTotal').textContent = `(${money(me.prizeValue)} value)`;
+    $('winnings').innerHTML = me.winnings.map(w => `<li><b>${esc(w.label)}</b></li>`).join('');
+  }
+
+  // leaderboard
+  $('board').innerHTML = s.players.slice(0, 8).map((p, i) => `
+    <li class="${i === 0 ? 'rank1' : ''}">
+      <span>${i === 0 ? '👑 ' : (i + 1) + '. '}${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span>
+      <span><b>${money(p.prizeValue)}</b>${p.active ? '' : ' ☠️'}</span>
+    </li>`).join('');
+  $('counts').textContent = `${s.playersIn} still in · ${s.playersOut} busted out`;
+
+  if (s.phase === 'done') {
+    $('phaseText').textContent = 'Game over — final results above. GG!';
+  }
+}
+
+setInterval(() => {
+  if (!state || !state.endsAt) return;
+  const total = state.settings.bidSeconds * 1000;
+  const left = Math.max(0, state.endsAt - Date.now());
+  $('timerFill').style.width = (100 * left / total) + '%';
+  $('timerText').textContent = Math.ceil(left / 1000) + 's left' + (state.phase === 'bidding' ? ' · bids in the last 10s extend the clock!' : '');
+}, 250);
+
+socket.on('state', render);
+socket.on('reveal', r => {
+  const card = $('revealCard');
+  card.className = 'reveal-card ' + (r.bust ? 'bust' : 'prize');
+  $('revealEmoji').textContent = r.noBids ? '🔥' : (r.bust ? '💥' : '🎁');
+  $('revealTitle').textContent = r.noBids ? 'No bids — lot burned!' : r.label;
+  $('revealDetail').textContent = r.noBids ? 'Nobody wanted this mystery. It goes back in the void.' : r.detail;
+  $('revealMeta').textContent = r.noBids ? '' :
+    `${r.winnerName} paid ${money(r.bid)}` + (r.eliminated.length ? ` · ☠️ ${r.eliminated.join(', ')} busted out!` : '');
+  $('revealOverlay').classList.remove('hidden');
+  clearTimeout(window.__rv);
+  window.__rv = setTimeout(() => $('revealOverlay').classList.add('hidden'), 7000);
+});
+$('revealOverlay').addEventListener('click', () => $('revealOverlay').classList.add('hidden'));
+
+// silent rejoin on refresh
+(async function init() {
+  if (myId && code && myName) {
+    $('codeIn').value = code; $('nameIn').value = myName;
+    await join(true);
+  }
+})();
+</script>
+</body>
+</html>
