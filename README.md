@@ -27,6 +27,7 @@ npm test
 ## Game rules (as built)
 
 - **15 lots per game**, shuffled every game: 10 real prizes + 5 busts.
+- **Host-editable prizes:** on the Create Room screen the host can rename lots, change prize values and bust penalties, flip a lot between prize and bust, add lots, or remove them (5–30 lots per game).
   - Prizes: $5 Meta Quest app · $10 Meta Quest app · $10 VRChat Plus · $20 Cash App ·
     $5 Cash App · $25 Cash App · VRChat Home Upgrade · 1 Month Join PulseVR ·
     50% Off Join PulseVR · **$100 PulseVR Spend** (adds $100 to the winner's balance)
@@ -37,7 +38,8 @@ npm test
 - **$0 = busted out.** No re-entry that game.
 - **One Peek per player per game:** privately learn whether the current box is a prize or a bust.
 - **ALL IN button** for the dramatic moment.
-- **Anti-snipe:** any bid in the last 10 seconds extends the clock 15 seconds (max 3×).
+- **Strict timer:** bidding closes the moment the clock hits zero — a bid in the last second does NOT add time. Bid before the timer runs out.
+- **Host can remove a player** any time from the Players table — seat and name are freed instantly (great for duplicate accounts). **Players can leave** from their phone with the Leave game button.
 - **One sealed High Roller round per game** (random lot): everyone submits ONE secret bid,
   highest wins. No bidding war.
 - Winner pays their bid, the box opens live for everyone, then the host moves to the next lot.
@@ -91,4 +93,4 @@ live leaderboard, and a dramatic 3-second REVEALING… beat before each box open
 
 - Starting cash and bid timer are set on the host's **Create Room** screen.
 - To change the lots, edit `PRIZES` / `BUST_LOTS` in `server.js`.
-- Bust mix, anti-snipe timing, and the 50-player cap are constants at the top of `server.js`.
+- Bust mix and the 50-player cap are constants at the top of `server.js`.

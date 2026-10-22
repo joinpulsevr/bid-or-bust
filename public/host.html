@@ -15,6 +15,11 @@
   .stat .num { font-size: 34px; font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
   .stat .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
   .spoiler { background: rgba(247,197,72,.1); border: 1px solid rgba(247,197,72,.5); border-radius: 12px; padding: 12px; }
+  .lot-row { display: grid; grid-template-columns: 92px 1.1fr 1.4fr 96px 96px 34px; gap: 6px; align-items: end; margin-bottom: 6px; }
+  .lot-row input, .lot-row select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: #fff; font-size: 14px; }
+  .lot-row select option { color: #000; }
+  .lot-row .amt-lbl { font-size: 11px; color: var(--muted); text-align: center; margin-bottom: 2px; }
+  @media (max-width: 760px) { .lot-row { grid-template-columns: 1fr 1fr; } .lot-row .detail-in { grid-column: 1 / -1; } }
 </style>
 </head>
 <body>
@@ -36,7 +41,14 @@
         <input type="number" id="bidSeconds" value="120" min="10" max="180">
       </div>
     </div>
-    <p class="muted small">15 mystery lots are shuffled fresh every game. One random lot becomes the sealed High Roller round. Bids move in $50 increments.</p>
+    <h3 style="margin-top:18px">🎁 Prizes — <span id="lotCount">15</span> lots</h3>
+    <p class="muted small">Edit the prizes for this room. Every lot needs a name. Prize value counts toward the leaderboard; balance bonus is extra cash added to the winner (usually 0); bust penalty is extra cash taken from the winner.</p>
+    <div id="lotRows"></div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-ghost" id="addLotBtn">+ Add a lot</button>
+      <button class="btn btn-ghost" id="resetLotsBtn">Reset to defaults</button>
+    </div>
+    <p class="muted small">Lots are shuffled fresh every game. One random lot becomes the sealed High Roller round. Bids move in $50 increments.</p>
     <button class="btn btn-primary btn-big" id="createBtn" style="margin-top:10px">Create Room</button>
   </div>
 
@@ -48,6 +60,8 @@
     </div>
     <div class="linkbox"><span id="playerLink"></span><button class="btn btn-ghost" data-copy="playerLink">Copy</button></div>
     <div class="linkbox"><span id="castLink"></span><button class="btn btn-ghost" data-copy="castLink">Copy</button></div>
+    <button class="btn btn-ghost btn-big" id="restartBtn" style="margin-top:10px">↻ Restart Session</button>
+    <p class="muted small center">Restart anytime — even mid-game. Ends the current game, returns everyone to the lobby with fresh cash. Same room code, nobody has to rejoin.</p>
     <p class="muted small center">Player link goes on phones. Broadcast link goes in OBS → stream it → load the stream in the VRChat video player.</p>
   </div>
 
@@ -62,7 +76,7 @@
   <!-- GAME -->
   <div class="card hidden" id="gameSec">
     <div class="row" style="justify-content:space-between">
-      <div><span class="kicker">Lot <span id="lotNum">1</span> of 15</span></div>
+      <div><span class="kicker">Lot <span id="lotNum">1</span> of <span id="lotTotal">15</span></span></div>
       <div><span class="pill in" id="phasePill">READY</span></div>
     </div>
     <div class="dots" id="dots"></div>
@@ -95,7 +109,7 @@
     <h3>Players</h3>
     <div style="overflow-x:auto">
     <table class="ptable">
-      <thead><tr><th>Player</th><th>Balance</th><th>Lots</th><th>Prize $</th><th>Status</th></tr></thead>
+      <thead><tr><th>Player</th><th>Balance</th><th>Lots</th><th>Prize $</th><th>Status</th><th></th></tr></thead>
       <tbody id="playerRows"></tbody>
     </table>
     </div>
@@ -123,10 +137,102 @@ function toast(msg) {
 }
 const ack = (ev, data) => new Promise(res => socket.emit(ev, data, res));
 
+// ---- prize editor ----
+const DEFAULT_LOTS = [
+  { kind: 'prize', label: '$5 Meta Quest App', detail: '$5 Meta Quest store app — winner picks the title!', value: 5, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$10 Meta Quest App', detail: '$10 Meta Quest store app — winner picks the title!', value: 10, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$10 VRChat Plus', detail: '$10 of VRChat Plus credit', value: 10, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$20 Cash App', detail: '$20 sent straight to Cash App', value: 20, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$5 Cash App', detail: '$5 sent straight to Cash App', value: 5, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$25 Cash App', detail: '$25 sent straight to Cash App', value: 25, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: 'VRChat Home Upgrade', detail: 'A fresh VRChat Home makeover', value: 25, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '1 Month Join PulseVR', detail: 'One month of PulseVR membership — on the house', value: 20, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '50% Off Join PulseVR', detail: 'Half off one month of PulseVR membership', value: 10, bonus: 0, penalty: 0 },
+  { kind: 'prize', label: '$100 PulseVR Spend', detail: '+$100 virtual cash added to your balance!', value: 100, bonus: 100, penalty: 0 },
+  { kind: 'bust', label: 'BUST: Nothing', detail: 'The box is empty. Absolutely nothing.', value: 0, bonus: 0, penalty: 0 },
+  { kind: 'bust', label: 'BUST: Nothing', detail: 'The box is empty. Absolutely nothing.', value: 0, bonus: 0, penalty: 0 },
+  { kind: 'bust', label: 'BUST: Lose $50', detail: '-$50 ripped straight out of your balance!', value: 0, bonus: 0, penalty: 50 },
+  { kind: 'bust', label: 'BUST: Lose $50', detail: '-$50 ripped straight out of your balance!', value: 0, bonus: 0, penalty: 50 },
+  { kind: 'bust', label: 'BUST: Lose $100', detail: '-$100 ripped straight out of your balance!', value: 0, bonus: 0, penalty: 100 },
+];
+let lotState = JSON.parse(JSON.stringify(DEFAULT_LOTS));
+
+function renderLotRows() {
+  const wrap = $('lotRows');
+  wrap.innerHTML = '';
+  lotState.forEach((lot, i) => {
+    const row = document.createElement('div');
+    row.className = 'lot-row';
+    row.innerHTML = `
+      <select class="kind-sel">
+        <option value="prize" ${lot.kind === 'prize' ? 'selected' : ''}>🎁 Prize</option>
+        <option value="bust" ${lot.kind === 'bust' ? 'selected' : ''}>💥 Bust</option>
+      </select>
+      <input class="label-in" value="${esc(lot.label)}" placeholder="Prize name" maxlength="60">
+      <input class="detail-in" value="${esc(lot.detail)}" placeholder="Detail (shown on reveal)" maxlength="200">
+      <div><div class="amt-lbl">${lot.kind === 'prize' ? 'Prize value' : 'Penalty'}</div>
+        <input type="number" class="amt-in" value="${lot.kind === 'prize' ? lot.value : lot.penalty}" min="0" max="10000" step="5"></div>
+      <div class="bonus-wrap" style="${lot.kind === 'prize' ? '' : 'display:none'}"><div class="amt-lbl">Balance bonus</div>
+        <input type="number" class="bonus-in" value="${lot.bonus}" min="0" max="10000" step="5"></div>
+      <button class="btn btn-ghost del-btn" title="Remove this lot">×</button>`;
+    row.querySelector('.kind-sel').onchange = (e) => {
+      lot.kind = e.target.value;
+      if (lot.kind === 'bust') { lot.value = 0; lot.bonus = 0; }
+      else { lot.penalty = 0; }
+      renderLotRows();
+    };
+    row.querySelector('.label-in').oninput = (e) => { lot.label = e.target.value; };
+    row.querySelector('.detail-in').oninput = (e) => { lot.detail = e.target.value; };
+    row.querySelector('.amt-in').oninput = (e) => {
+      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+      if (lot.kind === 'prize') lot.value = v; else lot.penalty = v;
+    };
+    const bonusIn = row.querySelector('.bonus-in');
+    if (bonusIn) bonusIn.oninput = (e) => { lot.bonus = Math.max(0, parseInt(e.target.value, 10) || 0); };
+    row.querySelector('.del-btn').onclick = () => {
+      if (lotState.length <= 5) return toast('A game needs at least 5 lots.');
+      lotState.splice(i, 1);
+      renderLotRows();
+    };
+    wrap.appendChild(row);
+  });
+  $('lotCount').textContent = lotState.length;
+}
+
+function gatherLots() {
+  if (lotState.length < 5 || lotState.length > 30) { toast('A game needs 5–30 lots.'); return null; }
+  for (const lot of lotState) {
+    if (!lot.label.trim()) { toast('Give every lot a name.'); return null; }
+  }
+  return lotState.map(l => ({
+    kind: l.kind,
+    label: l.label.trim(),
+    detail: (l.detail || '').trim(),
+    value: l.kind === 'prize' ? Math.max(0, Math.floor(l.value) || 0) : 0,
+    bonus: l.kind === 'prize' ? Math.max(0, Math.floor(l.bonus) || 0) : 0,
+    penalty: l.kind === 'bust' ? Math.max(0, Math.floor(l.penalty) || 0) : 0,
+  }));
+}
+
+$('addLotBtn').onclick = () => {
+  if (lotState.length >= 30) return toast('30 lots max.');
+  lotState.push({ kind: 'prize', label: 'New Prize', detail: '', value: 10, bonus: 0, penalty: 0 });
+  renderLotRows();
+};
+$('resetLotsBtn').onclick = () => {
+  lotState = JSON.parse(JSON.stringify(DEFAULT_LOTS));
+  renderLotRows();
+  toast('Prizes reset to defaults.');
+};
+renderLotRows();
+
 async function createRoom() {
+  const lots = gatherLots();
+  if (!lots) return;
   const settings = {
     startCash: Math.max(100, parseInt($('startCash').value, 10) || 500),
     bidSeconds: Math.max(10, parseInt($('bidSeconds').value, 10) || 120),
+    lots,
   };
   const r = await ack('host:create', { settings });
   if (!r.ok) return toast(r.error);
@@ -156,7 +262,19 @@ $('startBtn').onclick = async () => { const r = await ack('host:startGame', {});
 $('openBtn').onclick = async () => { const r = await ack('host:openBidding', {}); if (!r.ok) toast(r.error || ''); };
 $('closeBtn').onclick = async () => { await ack('host:closeBidding', {}); };
 $('nextBtn').onclick = async () => { const r = await ack('host:nextLot', {}); if (!r.ok) toast(r.error); };
-$('newGameBtn').onclick = () => location.reload();
+$('newGameBtn').onclick = async () => { const r = await ack('host:restart', {}); if (!r.ok) toast(r.error); };
+$('restartBtn').onclick = async () => {
+  if (!confirm('Restart the session? This ends the current game and returns everyone to the lobby with fresh cash. Same room code — nobody has to rejoin.')) return;
+  const r = await ack('host:restart', {});
+  if (!r.ok) toast(r.error);
+};
+async function removePlayer(id) {
+  const row = state && state.players.find(p => p.id === id);
+  if (!row) return;
+  if (!confirm(`Remove ${row.name} from the game? Their seat and name will be freed.`)) return;
+  const r = await ack('host:removePlayer', { playerId: id });
+  if (!r.ok) toast(r.error);
+}
 
 function phaseLabel(ph) {
   return { lobby: 'LOBBY', between: 'READY', bidding: 'BIDDING OPEN', sealed: 'SEALED ROUND', reveal: 'REVEAL', done: 'GAME OVER' }[ph] || ph;
@@ -177,6 +295,7 @@ function render(s) {
 
   if (s.hostView) {
     $('lotNum').textContent = s.roundIndex + 1;
+    $('lotTotal').textContent = s.totalLots;
     const pill = $('phasePill');
     pill.textContent = phaseLabel(s.phase);
     pill.className = 'pill ' + (s.phase === 'bidding' || s.phase === 'sealed' ? 'in' : 'out');
@@ -227,6 +346,7 @@ function render(s) {
         <td>${esc(p.name)}</td><td>${money(p.balance)}</td><td>${p.lotsWon}</td>
         <td>${money(p.prizeValue)}</td>
         <td><span class="pill ${p.active ? 'in' : 'out'}">${p.active ? 'IN' : 'OUT'}</span></td>
+        <td><button class="btn btn-ghost" onclick="removePlayer('${p.id}')">Remove</button></td>
       </tr>`).join('');
   }
 

@@ -2,7 +2,7 @@
 
 *Paste into Discord / the lounge chat whenever you're ready to hype the event.
 All facts verified against the game build (15 lots, $500 start, $50 increments,
-one Peek per player, sealed High Roller round, anti-snipe, bust penalties).*
+one Peek per player, sealed High Roller round, strict timer, bust penalties).*
 
 ---
 

@@ -88,6 +88,9 @@
       <ul class="winnings-list standings" id="board"></ul>
       <p class="muted small center" id="counts"></p>
     </div>
+    <div class="center" style="margin-top:8px">
+      <button class="btn btn-ghost" id="leaveBtn">Leave game</button>
+    </div>
   </div>
 
   <div id="outOverlay" class="reveal-overlay hidden">
@@ -170,12 +173,34 @@ $('sealedBtn').onclick = async () => {
   if (!r.ok) return toast(r.error);
   $('sealedConfirm').textContent = `Locked in: ${money(amt)}. Fingers crossed.`;
 };
+$('leaveBtn').onclick = async () => {
+  if (!confirm('Leave the game? Your seat will be freed.')) return;
+  const r = await ack('player:leave', {});
+  if (!r.ok) return toast(r.error);
+  showLeaveScreen('You left the game.');
+};
+function showLeaveScreen(msg) {
+  myId = null;
+  localStorage.removeItem('bob_playerId');
+  $('gameSec').classList.add('hidden');
+  $('joinSec').classList.remove('hidden');
+  if (msg) toast(msg);
+}
+socket.on('removed', (d) => {
+  showLeaveScreen(d && d.by === 'host' ? 'The host removed you from the game.' : 'You left the game.');
+});
 
 function render(s) {
   state = s;
   const me = s.players.find(p => p.id === myId);
   if (!me) return;
 
+  // A restarted session is a clean slate on phones too.
+  if (s.phase === 'lobby') {
+    $('peekResult').textContent = '';
+    $('sealedConfirm').textContent = '';
+    $('sealedAmt').value = '';
+  }
   $('balance').textContent = money(me.balance);
   const pill = $('statusPill');
   pill.textContent = me.active ? 'IN THE GAME' : 'BUSTED OUT';
@@ -257,7 +282,7 @@ setInterval(() => {
   const total = state.settings.bidSeconds * 1000;
   const left = Math.max(0, state.endsAt - Date.now());
   $('timerFill').style.width = (100 * left / total) + '%';
-  $('timerText').textContent = Math.ceil(left / 1000) + 's left' + (state.phase === 'bidding' ? ' · bids in the last 10s extend the clock!' : '');
+  $('timerText').textContent = Math.ceil(left / 1000) + 's left';
 }, 250);
 
 socket.on('state', render);

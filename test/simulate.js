@@ -49,7 +49,8 @@ function check(name, cond, extra = '') {
   const earlyBid = await ack(players[0].sock, 'player:bid', { amount: 50 });
   check('bid rejected before bidding opens', !earlyBid.ok);
 
-  let peekOnce = false, peekTwiceRejected = false;
+  let peekOnce = false, peekTwiceRejected = false, peekDone = false;
+  let endedEarly = false;
   let totalPaid = 0, totalPenalty = 0, totalBonus = 0, clampOverflow = 0;
   let sealedRoundsSeen = 0;
 
@@ -61,6 +62,7 @@ function check(name, cond, extra = '') {
   for (let round = 0; round < 15; round++) {
     const opened = await ack(host, 'host:openBidding', {});
     if (!opened.ok) { check('open bidding round ' + (round + 1), false, opened.error); break; }
+    if (opened.gameOver) { endedEarly = true; break; } // everybody busted out: game over
     await sleep(250);
     const sealed = hostState.isSealed;
     if (sealed) sealedRoundsSeen++;
@@ -79,7 +81,8 @@ function check(name, cond, extra = '') {
     } else {
       const bad = await ack(active[0].sock, 'player:bid', { amount: 75 });
       check(`round ${round + 1}: non-$50 bid rejected`, !bad.ok);
-      if (round === 0) {
+      if (!peekDone) {
+        peekDone = true;
         const pk = await ack(active[0].sock, 'player:peek', {});
         peekOnce = pk.ok && typeof pk.isPrize === 'boolean';
         const pk2 = await ack(active[0].sock, 'player:peek', {});
@@ -125,14 +128,19 @@ function check(name, cond, extra = '') {
     }
   }
 
-  check('exactly one sealed round played', sealedRoundsSeen === 1, String(sealedRoundsSeen));
+  if (endedEarly) {
+    check('game ended early by elimination', hostState.players.every((p) => !p.active));
+    check('at most one sealed round played', sealedRoundsSeen <= 1, String(sealedRoundsSeen));
+  } else {
+    check('exactly one sealed round played', sealedRoundsSeen === 1, String(sealedRoundsSeen));
+  }
   check('peek reveals prize/bust once', peekOnce);
   check('second peek rejected', peekTwiceRejected);
 
   await ack(host, 'host:nextLot', {});
   await sleep(300);
   check('game reached DONE', hostState.phase === 'done', hostState.phase);
-  check('all 15 lots revealed', hostState.hostView.lots.every((l) => l.kind !== 'mystery'));
+  if (!endedEarly) check('all 15 lots revealed', hostState.hostView.lots.every((l) => l.kind !== 'mystery'));
   check('balances sane (>=0, $50 steps)',
     hostState.players.every((p) => p.balance >= 0 && p.balance % 50 === 0));
   check('busted-out players sit at $0',
@@ -148,7 +156,18 @@ function check(name, cond, extra = '') {
     (std[i - 1].prizeValue === p.prizeValue && std[i - 1].balance >= p.balance));
   check('standings sorted by prize value', sorted);
 
-  const passed = results.filter((r) => r.ok).length;
-  console.log(`\n==== ${passed}/${results.length} checks passed ====`);
+  // Host restart: available after the game, resets to a fresh lobby.
+  await sleep(300);
+  const rs = await ack(host, 'host:restart', {});
+  await sleep(300);
+  check('host can restart after game over', rs.ok && hostState.phase === 'lobby', hostState && hostState.phase);
+  check('restart resets balances to start cash',
+    hostState.players.every((p) => p.balance === 500 && p.active && p.prizeValue === 0));
+  check('restart keeps all players in the room', hostState.players.length === 6);
+  const again = await ack(host, 'host:startGame', {});
+  await sleep(300);
+  check('game can start again after restart', again.ok && hostState.phase === 'between', hostState && hostState.phase);
+
+  const passed = results.filter((r) => r.ok).length;  console.log(`\n==== ${passed}/${results.length} checks passed ====`);
   process.exit(passed === results.length ? 0 : 1);
 })().catch((e) => { console.error('TEST CRASH:', e); process.exit(1); });

@@ -18,9 +18,9 @@ const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 50;
 const INCREMENT = 50;                 // bids move in $50 steps
-const ANTI_SNIPE_WINDOW_MS = 10000;   // bid inside last 10s ...
-const ANTI_SNIPE_EXTEND_MS = 15000;   // ... extends the clock 15s
-const MAX_EXTENSIONS = 3;
+// Strict timer: bidding closes the moment the clock hits zero. A bid in the
+// last second counts only if it lands before the timer fires — it never
+// buys extra time.
 
 // ---------------------------------------------------------------------------
 // The 15 lots: 10 prizes + 5 busts, shuffled fresh every game.
@@ -46,16 +46,46 @@ const BUST_LOTS = [
   { key: 'lose100',  label: 'BUST: Lose $100',  detail: '-$100 ripped straight out of your balance!', bust: true, penalty: 100 },
 ];
 
-function shuffledLots() {
-  const lots = [
+function shuffledLots(custom) {
+  const base = custom || [
     ...PRIZES.map(p => ({ ...p, kind: 'prize' })),
     ...BUST_LOTS.map(b => ({ ...b, kind: 'bust', value: 0 })),
   ];
+  const lots = [...base];
   for (let i = lots.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [lots[i], lots[j]] = [lots[j], lots[i]];
   }
   return lots.map((l, i) => ({ ...l, id: i, revealed: false }));
+}
+
+// Host-supplied prize list (from the host screen's prize editor). Returns a
+// cleaned list, or null when the list is invalid (host:create then rejects
+// the room instead of silently falling back to defaults).
+function sanitizeLots(input) {
+  if (!Array.isArray(input) || input.length < 5 || input.length > 30) return null;
+  const num = (v, fb) => {
+    v = Number(v);
+    return Number.isFinite(v) ? Math.min(10000, Math.max(0, Math.floor(v))) : fb;
+  };
+  const lots = [];
+  for (let i = 0; i < input.length; i++) {
+    const l = input[i] || {};
+    const kind = l.kind === 'bust' ? 'bust' : 'prize';
+    const label = String(l.label || '').trim().slice(0, 60);
+    if (!label) return null;
+    lots.push({
+      key: 'custom' + i,
+      kind,
+      label,
+      detail: String(l.detail || '').trim().slice(0, 200),
+      value: kind === 'prize' ? num(l.value, 0) : 0,
+      bonus: kind === 'prize' ? num(l.bonus, 0) : 0,
+      penalty: kind === 'bust' ? num(l.penalty, 0) : 0,
+      bust: kind === 'bust',
+    });
+  }
+  return lots;
 }
 
 function clampInt(v, min, max, fallback) {
@@ -78,7 +108,7 @@ function makeCode() {
   return code;
 }
 
-function newRoom(settings) {
+function newRoom(settings, customLots) {
   const code = makeCode();
   const room = {
     code,
@@ -87,6 +117,7 @@ function newRoom(settings) {
     settings: {
       startCash: clampInt(settings && settings.startCash, 100, 5000, 500),
       bidSeconds: clampInt(settings && settings.bidSeconds, 10, 180, 120),
+      lots: customLots || null, // null = default prize list
     },
     players: new Map(),   // playerId -> player
     phase: 'lobby',       // lobby | between | bidding | sealed | reveal | done
@@ -98,7 +129,6 @@ function newRoom(settings) {
     sealedBids: new Map(), // playerId -> { amount, at }
     endsAt: null,
     timer: null,
-    extensions: 0,
     lastReveal: null,
     createdAt: Date.now(),
   };
@@ -145,7 +175,6 @@ function hostState(room) {
     currentLot: lot ? { kind: lot.kind, label: lot.label, detail: lot.detail } : null,
     sealedRound: room.sealedRound,
     lots: room.lots.map(l => (l.revealed ? { kind: l.kind, label: l.label } : { kind: 'mystery' })),
-    extensions: room.extensions,
   };
   return s;
 }
@@ -167,7 +196,7 @@ function scheduleClose(room) {
 function startGame(room) {
   if (room.phase !== 'lobby') return { ok: false, error: 'Game already started.' };
   if (room.players.size === 0) return { ok: false, error: 'No players have joined yet.' };
-  room.lots = shuffledLots();
+  room.lots = shuffledLots(room.settings.lots);
   room.sealedRound = Math.floor(Math.random() * room.lots.length); // one secret "High Roller" round
   room.roundIndex = 0;
   room.phase = 'between';
@@ -187,7 +216,6 @@ function openBidding(room) {
   room.currentBid = 0;
   room.highBidderId = null;
   room.sealedBids = new Map();
-  room.extensions = 0;
   room.phase = (room.roundIndex === room.sealedRound) ? 'sealed' : 'bidding';
   room.endsAt = Date.now() + room.settings.bidSeconds * 1000;
   scheduleClose(room);
@@ -276,13 +304,71 @@ function nextLot(room) {
   return { ok: true };
 }
 
+// Host "start over" safety valve: works in ANY phase (lobby, mid-game, or
+// done), e.g. when something glitches. Same room code, same host token —
+// players stay in the room, everyone is reset to a fresh stack and the
+// game returns to the lobby, ready to start again.
+function restartSession(room) {
+  if (room.timer) { clearTimeout(room.timer); room.timer = null; }
+  room.phase = 'lobby';
+  room.lots = [];
+  room.roundIndex = -1;
+  room.sealedRound = -1;
+  room.currentBid = 0;
+  room.highBidderId = null;
+  room.sealedBids = new Map();
+  room.endsAt = null;
+  room.lastReveal = null;
+  for (const p of room.players.values()) {
+    p.balance = room.settings.startCash;
+    p.active = true;
+    p.winnings = [];
+    p.peekUsed = false;
+    p.lotsWon = 0;
+    p.prizeValue = 0;
+  }
+  emitState(room);
+  return { ok: true };
+}
+
+// Remove a player entirely (host kick or voluntary leave). Frees the seat
+// and the name, drops their sealed bid, and restarts the lot's bidding if
+// they held the high bid. A player removed mid-game cannot rejoin that game
+// (new seats only open in the lobby); in the lobby they can rejoin freely.
+function removePlayerFromRoom(room, playerId, by) {
+  const p = room.players.get(playerId);
+  if (!p) return { ok: false, error: 'Player not found.' };
+  room.players.delete(playerId);
+  room.sealedBids.delete(playerId);
+  if (room.highBidderId === playerId) {
+    room.highBidderId = null;
+    room.currentBid = 0;
+  }
+  const sock = p.socketId && io.sockets.sockets.get(p.socketId);
+  if (sock) {
+    sock.leave(room.code);
+    if (sock.playerRef && sock.playerRef.playerId === playerId) sock.playerRef = null;
+    sock.emit('removed', { by });
+  }
+  emitState(room);
+  return { ok: true, name: p.name };
+}
+
 // ---------------------------------------------------------------------------
 // Socket protocol
 // ---------------------------------------------------------------------------
 io.on('connection', (socket) => {
   // ---- host ----
   socket.on('host:create', ({ settings } = {}, cb) => {
-    const room = newRoom(settings);
+    let customLots = null;
+    if (settings && settings.lots !== undefined) {
+      customLots = sanitizeLots(settings.lots);
+      if (!customLots) {
+        if (cb) cb({ ok: false, error: 'Prize list is invalid — need 5–30 lots, each with a name.' });
+        return;
+      }
+    }
+    const room = newRoom(settings, customLots);
     room.hostSocketId = socket.id;
     socket.hostRef = { code: room.code };
     socket.join(room.code);
@@ -329,6 +415,22 @@ io.on('connection', (socket) => {
   socket.on('host:nextLot', (_data, cb) => {
     const room = requireHost(cb); if (!room) return;
     if (cb) cb(nextLot(room));
+  });
+
+  socket.on('host:restart', (_data, cb) => {
+    const room = requireHost(cb); if (!room) return;
+    if (cb) cb(restartSession(room));
+  });
+
+  socket.on('host:removePlayer', ({ playerId } = {}, cb) => {
+    const room = requireHost(cb); if (!room) return;
+    if (cb) cb(removePlayerFromRoom(room, playerId, 'host'));
+  });
+
+  socket.on('player:leave', (_data, cb) => {
+    const ctx = requirePlayer(cb); if (!ctx) return;
+    const { room, p } = ctx;
+    if (cb) cb(removePlayerFromRoom(room, p.id, 'you'));
   });
 
   // ---- players ----
@@ -388,12 +490,8 @@ io.on('connection', (socket) => {
     if (room.highBidderId === p.id) return fail('You already hold the high bid.');
     room.currentBid = amount;
     room.highBidderId = p.id;
-    // anti-snipe: late bids extend the clock
-    if (room.endsAt - Date.now() < ANTI_SNIPE_WINDOW_MS && room.extensions < MAX_EXTENSIONS) {
-      room.endsAt += ANTI_SNIPE_EXTEND_MS;
-      room.extensions += 1;
-      scheduleClose(room);
-    }
+    // Strict timer: the clock never moves. A bid in the last second counts
+    // only if it lands before the timer fires — it never buys extra time.
     emitState(room);
     cb({ ok: true });
   });

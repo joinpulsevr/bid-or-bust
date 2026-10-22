@@ -38,9 +38,11 @@ can paste fast, and Cash App open and ready.
 
 - Everyone starts with **$500** virtual cash, bids in **$50** increments.
 - **One Peek per player per game** — they can privately check prize vs. bust.
-- **Anti-snipe:** bids in the last 10 seconds extend the clock 15s (max 3×).
+- **Strict timer:** bidding closes the moment the clock hits zero — a last-second bid does NOT add time.
+- **Duplicate accounts?** The host's Players table has a Remove button per player — it frees the seat and name instantly, even mid-game, and a removed mid-game player can't rejoin that game. Players can also leave on their own from their phone.
 - **One sealed High Roller round** per game (random lot): one secret bid each,
   highest wins, no bidding war. Great for the finale.
+- **Prizes are editable:** on the Create Room screen, change names, values, bust penalties, or add/remove lots before creating the room. Restarting a session keeps the same prizes; a brand-new room starts from the editor again.
 - **$0 balance = eliminated**, no re-entry that game.
 - The **$100 PulseVR Spend** lot adds $100 to the winner's balance — announce
   it big, it's the comeback mechanic.
