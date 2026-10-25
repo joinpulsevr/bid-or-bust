@@ -3,280 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PULSEVR Life — Road to Riches</title>
+<title>Bid or Bust — Join PulseVR</title>
 <link rel="stylesheet" href="style.css">
-<script src="/socket.io/socket.io.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-<div class="bg-glow" aria-hidden="true"></div>
-<div id="toasts" class="toasts" aria-live="polite"></div>
+<div class="wrap center" style="max-width:640px">
+  <img class="flyer-banner" src="flyer.jpg" alt="PulseVR Presents: Bid or Bust — official event flyer">
 
-<header class="topbar">
-  <div class="logo-mini"><span class="crown">♛</span> PULSEVR <span class="life-mini">Life</span></div>
-  <div class="top-actions">
-    <span id="serverStatus" class="status-pill">Connecting…</span>
-    <span id="dayBadge" class="status-pill gold">Day 1</span>
-    <button id="mailBtn" class="btn btn-ghost hidden" type="button">✉️ Mail <span id="mailBadge" class="badge hidden">0</span></button>
-    <button id="logoutBtn" class="btn btn-ghost hidden" type="button">Logout</button>
+  <div class="card">
+    <h3>How it plays</h3>
+    <p class="muted" style="text-align:left; line-height:1.65">
+      Everyone starts with the same stack of virtual PulseVR cash. Each round a mystery box hits the
+      block — bid in <b>$50 increments</b>. Win the bid, pay the price, and the box opens live:
+      it could be Cash App money, a Meta Quest app, VRChat Plus, PulseVR membership perks…
+      or a <b>BUST</b> (nothing, −$50, or −$100). Hit <b>$0 and you're out</b>.
+      One round per game is a sealed <b>High Roller</b> round — one secret bid each.
+      Everyone gets one <b>Peek</b> per game: learn whether a box is a prize or a bust.
+    </p>
   </div>
-</header>
 
-<main>
-  <!-- ============ LANDING ============ -->
-  <section id="view-landing" class="view">
-    <div class="hero-wrap">
-      <img class="hero-img" src="hero.jpg" alt="PULSEVR Life — luxury lifestyle artwork" onerror="this.classList.add('img-broken')">
-      <div class="hero-overlay"></div>
-      <div class="hero-copy">
-        <div class="logo-big">
-          <div class="crown-big">♛</div>
-          <div class="logo-text">PULSEVR</div>
-          <div class="logo-life">Life</div>
-          <div class="logo-tag">ROAD TO RICHES</div>
-        </div>
-        <p class="hero-sub">Own the mansion. Drive the dream. Build your empire — one bold move at a time.</p>
-        <p class="hero-chips"><span>🏠 Deed cards</span><span>🎲 Dice &amp; deals</span><span>💰 Cash stacks</span><span>👑 Crown the richest</span></p>
-        <button id="playNowBtn" class="btn btn-play" type="button">▶ PLAY NOW</button>
-        <button id="howToPlayBtn" class="btn btn-ghost" type="button">📖 How to Play</button>
-        <p class="hero-note">One link. Phone or web. Your progress saves on the live server.</p>
-      </div>
-    </div>
-    <div class="feature-row">
-      <div class="feature">🏠 <strong>Buy homes</strong><span>Collect daily rent as they grow in value.</span></div>
-      <div class="feature">🚗 <strong>Collect cars</strong><span>Scarce rides that boost your net worth.</span></div>
-      <div class="feature">💼 <strong>Climb careers</strong><span>Work shifts, earn promotions, unlock CEO.</span></div>
-      <div class="feature">🛍️ <strong>Trade</strong><span>List homes on the marketplace and sell to other players.</span></div>
-    </div>
-  </section>
-
-  <!-- ============ SIGN-IN ============ -->
-  <section id="view-auth" class="view hidden">
-    <div class="auth-card">
-      <div class="logo-med"><span class="crown">♛</span> PULSEVR <span class="life-mini">Life</span></div>
-      <p class="auth-sub">Sign in to continue your game.</p>
-      <div class="tabs" role="tablist">
-        <button id="tabMember" class="tab active" type="button" role="tab" aria-selected="true">Player</button>
-        <button id="tabAdmin" class="tab" type="button" role="tab" aria-selected="false">Admin</button>
-      </div>
-      <form id="memberForm" class="auth-form">
-        <label for="memberIdInput">Member ID</label>
-        <input id="memberIdInput" type="text" autocomplete="off" autocapitalize="characters" placeholder="Enter your Member ID" required>
-        <p class="field-note">Your ID is private — it is never shown to other players.</p>
-        <button class="btn btn-play btn-full" type="submit">Enter the Game</button>
-      </form>
-      <form id="adminForm" class="auth-form hidden">
-        <label for="adminIdInput">Admin ID</label>
-        <input id="adminIdInput" type="password" autocomplete="off" placeholder="Enter your Admin ID" required>
-        <p class="field-note">Admin access only. This opens the management console, not the game.</p>
-        <button class="btn btn-play btn-full" type="submit">Enter Admin Console</button>
-      </form>
-      <p id="authError" class="error hidden" role="alert"></p>
-      <button id="backToLanding" class="btn btn-ghost" type="button">← Back to home</button>
-    </div>
-  </section>
-
-  <!-- ============ PLAYER DASHBOARD ============ -->
-  <section id="view-game" class="view hidden">
-    <div class="player-head">
-      <div id="playerAvatar" class="avatar avatar-lg" aria-hidden="true">?</div>
-      <div class="player-head-text">
-        <h2 id="playerName">Player</h2>
-        <p><span id="playerTier" class="tier-badge"></span> <span id="playerPoints" class="points-badge">0 pts</span></p>
-        <p class="private-line">Your ID (private): <span id="ownId" class="private-id"></span></p>
-      </div>
-      <div class="money-grid">
-        <div class="money"><span>Cash</span><strong id="cashVal">$0</strong></div>
-        <div class="money gold"><span>Net Worth</span><strong id="netWorthVal">$0</strong></div>
-        <div class="money"><span>Play Time</span><strong id="playTimeVal">0s</strong></div>
-      </div>
-      <button id="walletBtn" class="btn btn-gold" type="button">👛 Wallet</button>
-    </div>
-
-    <div class="board-card">
-      <h3>🛣️ Road to Riches</h3>
-      <div id="boardPath" class="board-path" aria-label="Board path"></div>
-      <p class="board-note">Your pawn moves as your net worth grows. Reach the crown at the end of the road.</p>
-    </div>
-
-    <div class="two-col">
-      <div class="card" id="careerCard">
-        <h3>💼 Career</h3>
-        <p id="careerStatus" class="muted">Career details load from the live server.</p>
-        <div id="careerLevels" class="career-levels"></div>
-        <div class="btn-row">
-          <button id="workBtn" class="btn btn-gold" type="button">Work Shift</button>
-          <button id="promoteBtn" class="btn btn-pink" type="button">Promote</button>
-          <button id="mbaBtn" class="btn btn-ghost" type="button">Buy MBA</button>
-        </div>
-        <label for="careerSelect">Switch ladder</label>
-        <div class="btn-row">
-          <select id="careerSelect"></select>
-          <button id="switchCareerBtn" class="btn btn-ghost" type="button">Switch</button>
-        </div>
-        <p id="careerNote" class="muted small"></p>
-      </div>
-
-      <div class="card">
-        <h3>🏆 Live Leaderboard</h3>
-        <ol id="leaderboardList" class="leaderboard"></ol>
-        <p class="muted small">Player names only — no private details are ever shown here.</p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>🏠 Homes — Deed Cards</h3>
-      <div id="homesGrid" class="deed-grid"><p class="muted">Homes load from the live server.</p></div>
-      <h4>Your homes</h4>
-      <div id="ownedHomes" class="owned-list"><p class="muted">You do not own any homes yet.</p></div>
-    </div>
-
-    <div class="card">
-      <h3>🚗 Cars</h3>
-      <div id="carsGrid" class="deed-grid"><p class="muted">Cars load from the live server.</p></div>
-      <h4>Your cars</h4>
-      <div id="ownedCars" class="owned-list"><p class="muted">You do not own any cars yet.</p></div>
-    </div>
-
-    <div class="card">
-      <h3>🛍️ Marketplace</h3>
-      <div id="marketList" class="market-list"><p class="muted">Marketplace listings load from the live server.</p></div>
-    </div>
-
-    <div class="card" id="mailCard">
-      <h3>📧 Private Messages</h3>
-      <p class="muted small">Message other players privately by their exact name. Only you and the recipient can read a message — not even admins.</p>
-      <form id="composeForm" class="form-grid">
-        <label>To (player name) <input id="mailTo" type="text" autocomplete="off" required></label>
-        <label>Subject <input id="mailSubject" type="text" maxlength="100"></label>
-        <label>Message <textarea id="mailBody" rows="3" maxlength="2000" required></textarea></label>
-        <button class="btn btn-gold" type="submit">Send Message</button>
-      </form>
-      <p id="mailMsg" class="muted small"></p>
-      <h4>Inbox</h4>
-      <div id="mailList" class="mail-list"><p class="muted">No messages yet.</p></div>
-    </div>
-  </section>
-
-  <!-- ============ ADMIN CONSOLE ============ -->
-  <section id="view-admin" class="view hidden">
-    <div class="admin-head">
-      <h2>🛡️ Admin Console</h2>
-      <p class="muted">Manage the game only — admins do not play and never appear on the leaderboard.</p>
-      <div class="btn-row">
-        <button id="refreshLedgerBtn" class="btn btn-gold" type="button">Refresh Ledger</button>
-        <button id="refreshStandingsBtn" class="btn btn-gold" type="button">Refresh Standings</button>
-        <button id="advanceDayBtn" class="btn btn-pink" type="button">Advance Day →</button>
-      </div>
-    </div>
-
-    <div class="two-col">
-      <div class="card">
-        <h3>📊 Points Ledger</h3>
-        <div class="btn-row">
-          <button id="exportPointsBtn" class="btn btn-ghost" type="button">⬇ Download Points CSV</button>
-          <button id="exportStandingsBtn" class="btn btn-ghost" type="button">⬇ Download Standings CSV</button>
-        </div>
-        <div class="table-wrap"><table id="ledgerTable" class="table"><thead><tr><th>Name</th><th>Tier</th><th>Points</th><th>Play (s)</th><th>Net Worth</th></tr></thead><tbody></tbody></table></div>
-        <h4>Removed players</h4>
-        <div id="removedList" class="removed-list"><p class="muted">No removed players.</p></div>
-      </div>
-      <div class="card">
-        <h3>🏆 Standings</h3>
-        <div class="table-wrap"><table id="standingsTable" class="table"><thead><tr><th>Rank</th><th>Name</th><th>Tier</th><th>Net Worth</th><th>Homes</th><th>Cars</th><th>Points</th></tr></thead><tbody></tbody></table></div>
-      </div>
-    </div>
-
-    <div class="two-col">
-      <div class="card">
-        <h3>➕ Add Member</h3>
-        <form id="addMemberForm" class="form-grid">
-          <label>Name <input id="addName" type="text" maxlength="40" required></label>
-          <label>Tier
-            <select id="addTier" required>
-              <option value="Rookie">Rookie</option>
-              <option value="Rising Star">Rising Star</option>
-              <option value="VIP">VIP</option>
-              <option value="Elite">Elite</option>
-              <option value="Legend">Legend</option>
-            </select>
-          </label>
-          <label>Member ID <input id="addMemberId" type="text" autocomplete="off" required></label>
-          <button class="btn btn-gold" type="submit">Add Member</button>
-        </form>
-        <p id="addMemberMsg" class="muted small"></p>
-      </div>
-      <div class="card">
-        <h3>🔑 Your Admin ID</h3>
-        <p class="muted small">Change the ID you use to sign in to this console. Keep it private.</p>
-        <form id="changeIdForm" class="form-grid">
-          <label>New Admin ID <input id="newAdminId" type="password" autocomplete="off" required></label>
-          <button class="btn btn-gold" type="submit">Change My Admin ID</button>
-        </form>
-        <p id="changeIdMsg" class="muted small"></p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>👥 Manage Players</h3>
-      <p class="muted small">Remove a player to suspend their account, or restore a removed player. Restores within 3 days keep full status; later restores start fresh.</p>
-      <form id="removeForm" class="form-grid">
-        <label>Member ID to remove <input id="removeMemberId" type="text" autocomplete="off" required></label>
-        <button class="btn btn-pink" type="submit">Remove Player</button>
-      </form>
-      <div id="manageList" class="manage-list"><p class="muted">Player management rows appear here once the ledger loads.</p></div>
-    </div>
-
-    <div class="card hidden" id="resetCard">
-      <h3>⚠️ Reset — CoolVibez Only</h3>
-      <p class="muted small">Resets are immediate and permanent. There is no undo and no 3-day grace — this is separate from remove/restore.</p>
-      <form id="resetPlayerForm" class="form-grid">
-        <label>Member ID to reset <input id="resetMemberId" type="text" autocomplete="off" required></label>
-        <button class="btn btn-pink" type="submit">Reset Player to Fresh Start</button>
-      </form>
-      <div class="btn-row">
-        <button id="resetGameBtn" class="btn btn-pink" type="button">Reset ENTIRE Game</button>
-      </div>
-      <p id="resetMsg" class="muted small"></p>
-    </div>
-
-    <div class="card">
-      <h3>🏠🚗 Catalog Controls</h3>
-      <p class="muted small">Changes apply to future purchases and to rent / appreciation from the next day cycle.</p>
-      <div id="catalogControls" class="catalog-controls"><p class="muted">Catalog controls load from the live server.</p></div>
-    </div>
-  </section>
-</main>
-
-<!-- ============ HOW TO PLAY MODAL ============ -->
-<div id="howToModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="howToTitle">
-  <div class="modal-card">
-    <h2 id="howToTitle">📖 How to Play</h2>
-    <p><strong>Goal:</strong> Be the richest player on the Road to Riches. Your pawn moves as your net worth grows — reach the crown at the end of the 40-tile road.</p>
-    <ul>
-      <li><strong>Careers:</strong> Pick a career ladder, then work shifts to earn that level's salary. Promotions need 5 shifts at your level AND playtime (60s for the first promotion, 180s for the second).</li>
-      <li><strong>Shift cap:</strong> You can work 3 shifts every 24 hours — no unlimited grinding. Plan your shifts.</li>
-      <li><strong>Homes:</strong> Buy homes to collect daily rent as they grow in value. Every 30 days each home charges utilities (2% of its value).</li>
-      <li><strong>Cars:</strong> Buy scarce cars to boost your net worth. Some cars are limited — when they're gone, they're gone.</li>
-      <li><strong>Marketplace:</strong> List homes for sale to other players, and buy homes they list.</li>
-      <li><strong>Board tiles:</strong> Special tiles grant rewards — cash bonuses, a tax return, and an exclusive car you can't buy anywhere else.</li>
-      <li><strong>Wallet:</strong> Tap Wallet anytime for a quickview of your cash, homes, cars, net worth, and next utility charge.</li>
-      <li><strong>Points:</strong> Earn PulseVR Points for playtime and milestones.</li>
-      <li><strong>Messages:</strong> Message other players privately from the Mail section. A badge pings you when new mail arrives.</li>
-    </ul>
-    <button id="howToCloseBtn" class="btn btn-gold" type="button">Got it!</button>
+  <div class="btn-row">
+    <a href="host.html" style="text-decoration:none"><button class="btn btn-primary btn-big">🔨 Host a Game</button></a>
+    <a href="play.html" style="text-decoration:none"><button class="btn btn-gold btn-big">📱 Join as Player</button></a>
+    <a href="broadcast.html" style="text-decoration:none"><button class="btn btn-ghost btn-big">📺 Broadcast View <span class="small muted">(for VRChat screen)</span></button></a>
   </div>
+
+  <p class="muted small" style="margin-top:22px">Players join from their phone with a 4-letter room code. The host screen runs the show; the broadcast view is built to be streamed into VRChat.</p>
 </div>
-
-<!-- ============ WALLET MODAL ============ -->
-<div id="walletModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="walletTitle">
-  <div class="modal-card">
-    <h2 id="walletTitle">👛 Wallet — Quickview</h2>
-    <div id="walletBody"></div>
-    <button id="walletCloseBtn" class="btn btn-gold" type="button">Close</button>
-  </div>
-</div>
-
-<footer class="footer">PULSEVR Life · Road to Riches · Play bold. 👑</footer>
-<script src="app.js"></script>
 </body>
 </html>
