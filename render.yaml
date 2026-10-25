@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bid-or-bust
+    name: pulsevr-life
     env: node
     plan: free
     buildCommand: npm install
@@ -8,3 +8,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      # DATABASE_URL is deliberately sync:false: Karen pastes the Neon
+      # connection string into the Render dashboard at deploy time.
+      # Never commit a real connection string to the repo.
+      - key: DATABASE_URL
+        sync: false
